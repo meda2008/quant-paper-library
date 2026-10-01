@@ -18,7 +18,24 @@
 import json, os, re, sys, time, collections
 
 sys.stdout.reconfigure(encoding="utf-8")
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+def _resolve_root():
+    """与 quant_library._resolve_root 同一套优先级：PAPER_ROOT > 同目录 .paper_root > paper_store。
+    这里不复用它是因为本脚本在 import quant_library 之前就要用 ROOT。"""
+    v = os.environ.get("PAPER_ROOT")
+    if v:
+        return v
+    cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".paper_root")
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            p = f.read().strip()
+        if p:
+            return p
+    except OSError:
+        pass
+    return "paper_store"
+
+
+ROOT = _resolve_root()
 CAT = os.path.join(ROOT, "catalog.json")
 OUT = os.path.join(ROOT, "rescue_manifest.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

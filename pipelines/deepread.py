@@ -8,7 +8,7 @@ import json, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import quant_library as q          # 复用安全写
 
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+ROOT = q._resolve_root()
 CATALOG = os.path.join(ROOT, "catalog.json")
 QUEUE = os.path.join(ROOT, "deepread_queue.jsonl")
 PRIO = ["中国A股", "机器学习选股", "多因子模型与检验", "动量与反转", "价值与基本面因子",

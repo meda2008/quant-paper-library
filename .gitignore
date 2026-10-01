@@ -14,3 +14,6 @@ _cap_hits.txt
 # 精读中间产物（切片与逐组结果，按批次命名）
 deepread_*.jsonl
 _res_*.jsonl
+
+# 机器相关的数据根目录指针，不入库
+.paper_root

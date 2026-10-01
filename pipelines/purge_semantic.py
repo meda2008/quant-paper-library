@@ -15,7 +15,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import quant_library as q
 
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+ROOT = q._resolve_root()
 REPORT = os.path.join(ROOT, "purge_semantic_report.md")
 MANIFEST = os.path.join(ROOT, "purge_semantic_manifest.json")
 

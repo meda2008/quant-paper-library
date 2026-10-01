@@ -9,7 +9,7 @@ import json, os, re, sys, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import quant_library as q          # 复用安全写：避免长时间读盘后用旧副本覆盖并发写入
 
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+ROOT = q._resolve_root()
 CAT = os.path.join(ROOT, "catalog.json")
 sys.stdout.reconfigure(encoding="utf-8")
 

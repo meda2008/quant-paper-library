@@ -5,7 +5,7 @@
 绝不改 catalog.json，绝不碰别的组的结果文件。**
 
 ## 输入行字段
-`key`（主键，输出必须原样带回）、`title`、`txt`（全文 txt 的绝对路径，在 Z: 盘）、
+`key`（主键，输出必须原样带回）、`title`、`txt`（全文 txt 的绝对路径，在数据根目录下）、
 `abstract`（来源摘要，可能为空）、`primary`（规则分类，仅供参考，可以推翻）、`date`、`state`。
 
 ## 每篇要做的事
@@ -37,14 +37,14 @@
 - 综述/评论/手册：一律 C，除非它自己跑了新实证。
 
 ## 输出（每读一篇立刻追加一行，别攒着）
-写到 `Z:/论文/deepread_res_<批次>_q<N>.jsonl`，UTF-8，`ensure_ascii=False`，每行：
+写到 `<ROOT>/deepread_res_<批次>_q<N>.jsonl`，UTF-8，`ensure_ascii=False`，每行：
 ```json
 {"key": "...", "ai_summary": "≤150字中文结论", "ai_grade": "A|B|C|D",
  "ai_findings": ["要点1", "要点2"], "read_at": "YYYY-MM-DD"}
 ```
 - `ai_summary` 超 150 字会被 merge 截到 800，但请先自己压短；写不短通常是没抓重点。
 - `ai_findings` 最多 3 条，每条一句中文，讲**可核查的口径缺陷或可复现要点**，不要抄 abstract。
-- 中途要改名/临时文件请留在同一盘（`Z:/论文`），跨盘 `os.replace` 会报 errno 18。
+- 中途要改名/临时文件请留在同一盘（`<ROOT>`），跨盘 `os.replace` 会报 errno 18。
 - Z: 盘偶发掉线（WinError 3 / 盘符在但访问不了）：等 60 秒重试，仍失败就如实报告"读到第 k 篇掉线"，
   **不要为了交差把没读的论文批量写成 D**。
 

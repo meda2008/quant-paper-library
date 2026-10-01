@@ -2,7 +2,7 @@
 
 ## 为什么有这一步
 索引阶段的金融门槛 `gate_verdict` 是**词表**判的：标题+摘要没有股票/组合/因子那类词，就直接判非金融，
-PDF 移进 `Z:/论文/_剔除-非金融/`。2026-09-30 这一轮它把 2986 篇新到货判掉了。抽检里绝大多数确实该判掉
+PDF 移进 `<ROOT>/_剔除-非金融/`。2026-09-30 这一轮它把 2986 篇新到货判掉了。抽检里绝大多数确实该判掉
 （传染病建模、排队论、保险准备金、气味分子、细胞迁移、图像 matting、多因子认证），
 但里面确实混着真货 —— 例如 "Statistical properties of market collective responses"（订单流对价格与
 流动性的冲击响应）、"Special Markowitz: Thermodynamic Formalism for the Joint Regularisation of
@@ -10,7 +10,7 @@ Returns and Covariance"（收益与协方差的联合正则）。词表对这类
 只有语义判据能清 —— 这是批15 清污时定下的规矩。
 
 ## 你要做的事
-输入：`Z:\论文\rescue_q<K>.jsonl`，每行一篇被门槛判掉的论文，字段
+输入：`<ROOT>\rescue_q<K>.jsonl`，每行一篇被门槛判掉的论文，字段
 `key / title / abstract / source / primary / date / rel / txt`。
 逐行判一个问题：**这篇是不是在做量化投资（选股/因子/组合构建与配置/风险定价/市场微观结构/回测方法）？**
 
@@ -23,7 +23,7 @@ Returns and Covariance"（收益与协方差的联合正则）。词表对这类
 - 不要为了"多捞"放宽：库已经 5290 篇，宁可少捞几十篇，不要放几百篇噪声进精读队列。
 
 ## 输出（务必边判边写）
-写到 `Z:\论文\rescue_res_q<K>.jsonl`，UTF-8、每行一个 JSON：
+写到 `<ROOT>\rescue_res_q<K>.jsonl`，UTF-8、每行一个 JSON：
 ```json
 {"key": "arxiv:xxxx", "verdict": "keep", "why": "一句话中文依据"}
 ```

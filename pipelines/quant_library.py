@@ -20,7 +20,28 @@ try:
 except Exception:
     pass
 
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+def _resolve_root():
+    """数据根目录优先级：环境变量 PAPER_ROOT > 脚本同目录的 .paper_root 文件 > ./paper_store。
+
+    为什么要 .paper_root 这一层：默认值改成相对 paper_store 之后，定时任务和
+    daily_update.cmd 都没设 PAPER_ROOT，于是 03:00 那一轮会在仓库里新建一个空的
+    paper_store 而不是写既有的库 —— 台账看起来"清零了"，等于把整个库弄丢。
+    用文件承接既有部署，仓库本身仍然不带任何机器相关路径。"""
+    v = os.environ.get("PAPER_ROOT")
+    if v:
+        return v
+    cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".paper_root")
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            p = f.read().strip()
+        if p:
+            return p
+    except OSError:
+        pass
+    return "paper_store"
+
+
+ROOT = _resolve_root()
 INBOX = os.path.join(ROOT, "_inbox")
 TXT = os.path.join(ROOT, "text")
 CATLOG = os.path.join(ROOT, "catalog.json")
@@ -730,7 +751,7 @@ BAK_KEEP = 8          # 33MB × 8 ≈ 270MB，Z: 只剩 10GB，够用且不吃�
 
 def _bak_dir():
     """BAK 必须在调用时按当前 ROOT 算：离线测试会把 ROOT 指到临时目录，
-    模块级常量会让测试把 33MB 快照写进真的 Z:/论文/_bak。"""
+    模块级常量会让测试把 33MB 快照写进真实数据根目录/_bak。"""
     return os.path.join(ROOT, "_bak")
 
 def backup_catalog(tag=""):
@@ -1092,7 +1113,7 @@ def _cmd_harvest(workers=3, new_only=False, interval=1.0, attempts=3, screen=Tru
           f"{'仅新条目' if new_only else '含历史失败重试'})", flush=True)
     cnt = {"ok": 0, "skip": 0, "fail": 0, "bad": 0}
     if not _space_ok():
-        print(f"[停] Z: 只剩 {free_gb():.2f} GB < 安全线 {MIN_FREE_GB} GB，不开下载；"
+        print(f"[停] {ROOT} 只剩 {free_gb():.2f} GB < 安全线 {MIN_FREE_GB} GB，不开下载；"
               f"先把 _剔除-非金融 里的非金融 PDF 搬走腾地方", flush=True)
         return
     t0 = time.time()
@@ -1117,7 +1138,7 @@ def _cmd_harvest(workers=3, new_only=False, interval=1.0, attempts=3, screen=Tru
                 # （2026-09-30 踩过：h2 的 harvest 报了 4839 篇 ok，盘上 done 却只涨了一百来篇）。
                 save_catalog(recs, orig)
                 if not _space_ok():
-                    print(f"  [{i}/{len(todo)}] [停] Z: 只剩 {free_gb():.2f} GB，低于安全线 "
+                    print(f"  [{i}/{len(todo)}] [停] {ROOT} 只剩 {free_gb():.2f} GB，低于安全线 "
                           f"{MIN_FREE_GB} GB，本轮下载到此为止（已下的都已落盘，剩下的下次接着下）",
                           flush=True)
                     break

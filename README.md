@@ -22,6 +22,11 @@ python pipelines/quant_library.py index          # 抽全文 → 分类 → 归�
 python pipelines/quant_library.py status         # 看当前台账
 ```
 
+根目录按这个优先级解析：`PAPER_ROOT` 环境变量 → 脚本同目录的 `.paper_root` 文件 → `./paper_store`。
+中间那层是给已有部署留的——定时任务和命令行不一定设了环境变量，放一个只写路径的
+`.paper_root` 就能指回既有的库。默认值是相对路径，所以忘设环境变量的那一轮会在仓库里
+新建一个空 `paper_store`，台账看起来像被清空了（`test_root_resolution` 守这个）。
+
 数据根目录会长成：
 
 ```
@@ -51,7 +56,7 @@ python pipelines/quant_library.py status         # 看当前台账
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PAPER_ROOT` | `paper_store` | 数据根目录 |
+| `PAPER_ROOT` | 见下 | 数据根目录 |
 | `MIN_FREE_GB` | `3.0` | 剩余空间低于此值 harvest 主动停手 |
 | `OA_PAGES` | `1` | OpenAlex 每词条翻几页 |
 | `NBER_PAGES` | `1` | NBER 每词条翻几页 |
@@ -156,6 +161,7 @@ cd tests && for t in test_*.py; do python $t; done
 | `test_sweep_cap` | arXiv 单查询 2000 封顶的探测与分片 |
 | `test_rel_score` | 撞词过滤（matting alpha、AlphaZero、Sharpe 人名…） |
 | `test_harvest_persist` | harvest 状态持久化、**空间闸真会停** |
+| `test_root_resolution` | 根目录解析优先级——防"忘设环境变量就写进一个新建的空库" |
 
 `test_catalog_merge` 里有一段白名单护栏：`quant_library` 新增检索腿而测试没打桩时
 会当场断言失败，而不是安静地去联网。2026-09-30 和 10-01 各被它抓到过一次真实外呼。

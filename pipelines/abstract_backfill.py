@@ -7,7 +7,23 @@
 """
 import json, os, re, sys, random
 
-ROOT = os.environ.get("PAPER_ROOT", "paper_store")
+def _resolve_root():
+    """PAPER_ROOT 环境变量 > 脚本同目录 .paper_root 文件 > ./paper_store（与 quant_library 一致）"""
+    v = os.environ.get("PAPER_ROOT")
+    if v:
+        return v
+    cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".paper_root")
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            p = f.read().strip()
+        if p:
+            return p
+    except OSError:
+        pass
+    return "paper_store"
+
+
+ROOT = _resolve_root()
 CAT = os.path.join(ROOT, "catalog.json")
 sys.stdout.reconfigure(encoding="utf-8")
 
