@@ -1,0 +1,9 @@
+# PDF 全文抽取（index 阶段用）
+PyMuPDF>=1.24
+
+# 其余全是标准库：
+#   urllib.request / xml.etree / csv / json / subprocess(curl.exe) / concurrent.futures
+#
+# 为什么下载要 curl.exe 而不是 urllib：
+#   arXiv 会按 TLS 指纹拦截 Python 的请求，直接 403/406（见 docs/PITFALLS.md）。
+#   Windows 上 curl.exe 是系统自带的，不需要装。

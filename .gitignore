@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+
+# 数据根目录默认落在仓库里的 paper_store/，整个不进版本库
+paper_store/
+
+# 运行产物
+logs/
+*.log
+_bak/
+_sweep_plan.json
+_cap_hits.txt
+
+# 精读中间产物（切片与逐组结果，按批次命名）
+deepread_*.jsonl
+_res_*.jsonl
