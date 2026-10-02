@@ -162,6 +162,7 @@ cd tests && for t in test_*.py; do python $t; done
 | `test_rel_score` | 撞词过滤（matting alpha、AlphaZero、Sharpe 人名…） |
 | `test_harvest_persist` | harvest 状态持久化、**空间闸真会停** |
 | `test_root_resolution` | 根目录解析优先级——防"忘设环境变量就写进一个新建的空库" |
+| `test_ocr_fallback` | 扫描件 OCR 兜底：真造一本"只有图片没有文本层"的 PDF 走端到端；没有 OCR 后端时整组跳过不算失败 |
 
 `test_catalog_merge` 里有一段白名单护栏：`quant_library` 新增检索腿而测试没打桩时
 会当场断言失败，而不是安静地去联网。2026-09-30 和 10-01 各被它抓到过一次真实外呼。
@@ -181,6 +182,11 @@ cd tests && for t in test_*.py; do python $t; done
 - **下载用 `curl.exe`**，Python 的 urllib 被 arXiv 按 TLS 指纹拦（403/406）。
 - **退让只对真限流**。429/503/截断才指数退让；非 arXiv 域的 rc=22 是永久墙（订阅墙/验证墙），
   快失败快 giveup——否则几百条死链每条烧 45 秒。
+- **扫描件 OCR 兜底**。NBER 早期工作论文整页是图片，PyMuPDF 抽出来是 0 字。`extract_pdf_text` 先按文本层抽，
+  只有不足 2000 字时才逐页渲染 200dpi 交 OCR（优先 RapidOCR，其次 tesseract），两者都没有就原样返回空——
+  **OCR 永远是可选能力，不会变成硬依赖**。上限 160 页/篇，防止一本大部头把整轮 index 拖死。
+  注意本机实测坑：tesseract 装了但 `tessdata` 里只有 `chi_sim`、没有 `eng` 时，`-l eng` 会初始化失败；
+  代码把这类失败按页吞掉，所以**要看 OCR 结果长度判断有没有真在工作，别只看返回码**。
 - **门槛分级**。`STRONG_GATE` 判断"是不是金融"（故意放宽），正文兜底，
   三档 `strong/body/fail`，只有 fail 才移出。收紧判据时"正文兜底 + 人工抽检"缺一必误杀。
 
@@ -189,7 +195,8 @@ cd tests && for t in test_*.py; do python $t; done
 ## 已知限制
 
 - 需要 `curl.exe`（Windows 自带；Linux/macOS 需装 curl 或改 `_curl`）。
-- 全文抽取依赖 PyMuPDF，扫描版 PDF（纯图片）抽不出文本，会被判 D。
+- 全文抽取依赖 PyMuPDF；整页图片的扫描件会走 OCR 兜底，但**需要本机装 RapidOCR 或带 `eng` 语言包的 tesseract**，
+  两者都没有时这类论文只能抽成空文本。
 - OpenAlex 匿名接口有每 IP 每日预算，用尽会回 429（约 UTC 零点重置）。
 - 金融门槛是**规则**判定，撞词误召回（portfolio/factor/selection 在非金融语境里）
   只能靠语义清污 `purge_semantic.py` 处理，机械门槛拦不住。

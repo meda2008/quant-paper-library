@@ -10,7 +10,7 @@
   <ROOT>/catalog.csv        全字段表（标题/作者/时间/来源/本地路径/分类/标签/简介/总结/DOI/引用数...）
 """
 import csv, json, os, re, sys, time, subprocess, urllib.parse, urllib.request
-import shutil, glob
+import shutil, glob, tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import fitz
@@ -662,7 +662,10 @@ FILL_IF_EMPTY = ("abstract", "doi", "cited", "authors", "date", "cats")
 KEEP_ON_MERGE = ("status", "pdf_path", "local_done", "text_done", "txt_path",
                  "primary", "tags", "summary", "offtopic", "pages", "error",
                  "ai_summary", "ai_grade", "ai_findings", "ai_read_at", "gate_level",
-                 "dup_of", "retries")   # dup_of/retries 2026-09-30 补：漏掉会被每日 catalog 重写抹掉
+                 "dup_of", "retries",
+                 # 台账救援与扫描件 OCR 的可追溯标记：漏在这里就会被每日 catalog 重写抹掉
+                 # （2026-10-02 加，同 dup_of 那次的教训）
+                 "rebound_at", "ocr", "ocr_pending")
 
 OR_TERMS = ["stock selection", "cross-section of stock returns", "factor investing",
     "alpha factor stock", "stock price prediction", "empirical asset pricing",
@@ -751,7 +754,7 @@ BAK_KEEP = 8          # 33MB × 8 ≈ 270MB，Z: 只剩 10GB，够用且不吃�
 
 def _bak_dir():
     """BAK 必须在调用时按当前 ROOT 算：离线测试会把 ROOT 指到临时目录，
-    模块级常量会让测试把 33MB 快照写进真实数据根目录/_bak。"""
+    模块级常量会让测试把 33MB 快照写进真的 Z:/论文/_bak。"""
     return os.path.join(ROOT, "_bak")
 
 def backup_catalog(tag=""):
@@ -1206,6 +1209,107 @@ def summarize(text, abstract):
     if find: parts.append("发现: " + " ".join(x[:260] for x in find))
     return " ｜ ".join(parts) if parts else "（未能自动提取，请查看简介/全文）"
 
+_TESS = None
+
+def _tesseract():
+    """找 tesseract 可执行文件。找不到就返回空串——OCR 是兜底，绝不能变成硬依赖。"""
+    global _TESS
+    if _TESS is None:
+        cands = [os.environ.get("TESSERACT_EXE"), shutil.which("tesseract"),
+                 r"C:\Program Files\Tesseract-OCR\tesseract.exe"]
+        _TESS = next((c for c in cands if c and os.path.exists(c)), "")
+    return _TESS
+
+_OCR_ENGINE = False        # False = 还没探测过
+
+def _ocr_engine():
+    """OCR 后端优先级：RapidOCR > tesseract。
+
+    本机实测：tesseract 装了但 **tessdata 里只有 chi_sim.traineddata、没有 eng**，
+    `-l eng` 会 "Failed loading language 'eng'" 直接初始化失败；而 rapidocr_onnxruntime
+    自带中英模型、完全离线，认英文正文没问题。所以默认先试 RapidOCR。
+    两个都没有就返回 ""，extract_pdf_text 会原样返回空文本层，不影响主流程。"""
+    global _OCR_ENGINE
+    if _OCR_ENGINE is False:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR_ENGINE = RapidOCR()
+        except Exception:
+            _OCR_ENGINE = "tesseract" if _tesseract() else ""
+    return _OCR_ENGINE
+
+def _ocr_image(png):
+    eng = _ocr_engine()
+    if not eng:
+        return ""
+    if eng == "tesseract":
+        try:
+            r = subprocess.run([_tesseract(), png, "stdout", "-l", "eng", "--psm", "3"],
+                               capture_output=True, timeout=180)
+            return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else ""
+        except Exception:
+            return ""
+    try:
+        res, _ = eng(png)
+        return "\n".join(line[1] for line in (res or []))
+    except Exception:
+        return ""
+
+OCR_MIN_CHARS = 2000        # PyMuPDF 抽出来的字少于这个数才考虑 OCR
+OCR_MAX_PAGES = 160         # 上限，防止一本 400 页的书把整轮 index 拖死
+OCR_DPI = 200
+
+def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
+    """扫描件兜底：整页是图片的老论文（NBER 早期工作论文尤其多），PyMuPDF 抽出来是 0 字。
+    逐页渲染成 PNG 交给 OCR，**只在外层抽不到字时才调用**。
+    某一页超时或识别失败只跳过该页，不抛异常——解析主流程不能因为 OCR 挂掉。"""
+    if not _ocr_engine():
+        return ""
+    parts, tmpd = [], tempfile.mkdtemp(prefix="qpl_ocr_")
+    try:
+        doc = fitz.open(path)
+        try:
+            for i, pg in enumerate(doc):
+                if i >= max_pages:
+                    break
+                if pg.get_text().strip():
+                    continue                      # 这页本来就有文本层，别浪费一次 OCR
+                if not pg.get_images(full=True):
+                    continue                      # 既没字也没图，是真空页
+                png = os.path.join(tmpd, "p%04d.png" % i)
+                try:
+                    pg.get_pixmap(dpi=dpi).save(png)
+                    got = _ocr_image(png)
+                    if got.strip():
+                        parts.append(got)
+                except Exception:
+                    pass
+                finally:
+                    if os.path.exists(png):
+                        os.remove(png)
+        finally:
+            doc.close()
+    except Exception:
+        return ""
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+    return "\n".join(parts)
+
+def extract_pdf_text(path):
+    """先按文本层抽；抽出来近乎为空（扫描件）才走 OCR。返回 (正文, 是否 OCR 得来的)。"""
+    doc = fitz.open(path)
+    try:
+        full = "\n".join(p.get_text() for p in doc)
+        pages = doc.page_count
+    finally:
+        doc.close()
+    if len(full.strip()) >= OCR_MIN_CHARS:
+        return full, pages, False
+    got = ocr_pdf(path)
+    if len(got.strip()) > len(full.strip()):
+        return got, pages, True
+    return full, pages, False
+
 def cmd_index():
     """索引阶段要解析上千个 PDF，动辄几小时。加锁是为了防止 03:00 定时任务和
     手动链条同时跑 index —— 两者都会移动 PDF、重写 catalog.csv/INDEX.md。"""
@@ -1253,10 +1357,10 @@ def _cmd_index():
                         except OSError:
                             pass
                 done += 1; continue
-            with open(r["pdf_path"], "rb") as f:
-                doc = fitz.open(stream=f.read(), filetype="pdf")
-            full = "\n".join(p.get_text() for p in doc)
-            r["pages"] = doc.page_count; doc.close()
+            full, npg, used_ocr = extract_pdf_text(r["pdf_path"])
+            r["pages"] = npg
+            if used_ocr:
+                r["ocr"] = True
             if not r.get("title") or len(r.get("title", "")) < 8:
                 first = [l.strip() for l in full.splitlines() if len(l.strip()) > 15]
                 r["title"] = first[0] if first else r["title"]
@@ -1306,13 +1410,23 @@ def _cmd_index():
                 (r.get("abstract","") or "")[:800], r.get("pdf_path",""), r.get("txt_path",""),
                 r.get("pages",""), "; ".join(r.get("cats",[])[:6]), r.get("arxiv_id",""), r.get("key",""), r.get("status","")])
     groups = {}
+    n_dup = 0
     for r in recs:
-        if r.get("status") == "done" and not r.get("offtopic"):
-            groups.setdefault(r.get("primary", FALLBACK), []).append(r)
+        if r.get("status") != "done" or r.get("offtopic"):
+            continue
+        if r.get("dup_of"):
+            # 同一篇文章常同时以 or:<nid> 和 arxiv:<id> 两个 key 入库，dupmark 会把副本指向主条。
+            # 索引里再列一遍等于同一篇占两行，条目数虚高（2026-10-02 实测 177 行）。
+            # catalog.csv 是全字段表，仍然保留每一条，只是 INDEX.md 不再重复列。
+            n_dup += 1
+            continue
+        groups.setdefault(r.get("primary", FALLBACK), []).append(r)
     n_off = sum(1 for r in recs if r.get("offtopic"))
     lines = ["# 量化因子论文库 · 总索引", "",
              f"更新: {time.strftime('%Y-%m-%d %H:%M')} ｜ 入库 {sum(len(v) for v in groups.values())} 篇 ｜ "
-             f"分类 {len(groups)} 个 ｜ 非金融剔除 {n_off} 篇（见 _剔除-非金融/） ｜ 全字段表见 catalog.csv，全文在 text/", ""]
+             f"分类 {len(groups)} 个 ｜ 非金融剔除 {n_off} 篇（见 _剔除-非金融/） ｜ 全字段表见 catalog.csv，全文在 text/",
+             f"另有 {n_dup} 条是已在库条目的同文异 key 副本（OpenReview/arXiv/OpenAlex 各一个号），"
+             f"已在台账里用 dup_of 指向主条，不在本索引重复列出。", ""]
     for cat in _ORDER:
         if cat not in groups: continue
         lines.append(f"## {cat}（{len(groups[cat])} 篇）\n")
@@ -1320,8 +1434,11 @@ def _cmd_index():
             au = (r["authors"][0] + " 等 " + str(len(r["authors"])) + "人") if len(r.get("authors",[]))>1 else \
                  (r["authors"][0] if r.get("authors") else "-")
             rel = r["pdf_path"].replace("\\", "/")
-            i = rel.find("论文/")
-            if i >= 0: rel = rel[i + 3:]
+            # 原来按字面量 "论文/" 截，换台机器（根目录不叫"论文"）就截不出相对路径、
+            # 把绝对路径当链接写进 INDEX.md。改成用实际根目录求相对路径。
+            root_rel = ROOT.replace("\\", "/").rstrip("/") + "/"
+            if rel.startswith(root_rel):
+                rel = rel[len(root_rel):]
             ai = r.get("ai_summary") or ""
             sum_s = (("[AI精读·" + r.get("ai_grade","") + "] " + ai) if ai else r.get("summary",""))[:300]
             lines.append(f"- **{sanitize(r['title'],140)}**  \n  {au} ｜ {r.get('date','-')} ｜ 来源: {r['source']}"

@@ -17,8 +17,8 @@ q.CATLOG = os.path.join(tmp, "catalog.json")
 
 old = [
     {"key": "arxiv:A", "source": "arXiv", "title": "OLD A", "pdf_url": "u", "abstract": "", "authors": [],
-     "date": "", "cats": [], "doi": "", "cited": "", "status": "done", "pdf_path": "<ROOT>/多因子模型与检验/A.pdf",
-     "text_done": True, "txt_path": "<ROOT>/text/A.txt", "primary": "多因子模型与检验", "tags": {"momentum": 3},
+     "date": "", "cats": [], "doi": "", "cited": "", "status": "done", "pdf_path": "Z:/论文/多因子模型与检验/A.pdf",
+     "text_done": True, "txt_path": "Z:/论文/text/A.txt", "primary": "多因子模型与检验", "tags": {"momentum": 3},
      "summary": "旧的总结", "offtopic": False, "pages": 42, "retries": 2, "gate_level": "strong",
      "ai_summary": "已精读", "ai_grade": "B"},
     {"key": "oa:B", "source": "OpenAlex", "title": "OLD B", "pdf_url": "u", "abstract": "", "authors": [],
@@ -26,12 +26,13 @@ old = [
      "error": "404"},
     {"key": "arxiv:C", "source": "arXiv", "title": "OLD C 本次检索未命中", "pdf_url": "u", "abstract": "",
      "authors": [], "date": "", "cats": [], "doi": "", "cited": "", "status": "done",
-     "pdf_path": "<ROOT>/机器学习选股/C.pdf", "text_done": True, "primary": "机器学习选股",
+     "pdf_path": "Z:/论文/机器学习选股/C.pdf", "text_done": True, "primary": "机器学习选股",
      "summary": "C 总结", "offtopic": True, "pages": 7},
     {"key": "or:E", "source": "OpenReview", "title": "OLD E", "pdf_url": "u5", "abstract": "旧摘要很完整",
      "authors": ["W"], "date": "2024-01", "cats": [], "doi": "d-e", "cited": 7, "status": "done",
-     "pdf_path": "<ROOT>/组合优化与配置/E.pdf", "text_done": True, "primary": "组合优化与配置",
-     "dup_of": "arxiv:A", "retries": 3},
+     "pdf_path": "Z:/论文/组合优化与配置/E.pdf", "text_done": True, "primary": "组合优化与配置",
+     "dup_of": "arxiv:A", "retries": 3,
+     "rebound_at": "2026-10-02", "ocr": True, "ocr_pending": True},
 ]
 json.dump(old, open(q.CATLOG, "w", encoding="utf-8"), ensure_ascii=False)
 
@@ -131,6 +132,9 @@ chk(recs["arxiv:D"]["status"] == "new", "D 新条目 status=new(会被下载)")
 chk(recs["or:E"]["abstract"] == "旧摘要很完整", "E：来源本轮没给摘要时旧 abstract 补空(2026-09-30 抹掉 546 条的回归)")
 chk(recs["or:E"].get("dup_of") == "arxiv:A", "E 的 dup_of 继承(曾被链条抹掉 55 条)")
 chk(recs["or:E"].get("retries") == 3, "E 的 retries 继承")
+chk(recs["or:E"].get("rebound_at") == "2026-10-02", "E 的 rebound_at 继承（台账救援标记不被每日重写抹掉）")
+chk(recs["or:E"].get("ocr") is True, "E 的 ocr 继承（扫描件兜底标记）")
+chk(recs["or:E"].get("ocr_pending") is True, "E 的 ocr_pending 继承")
 chk(recs["or:E"]["doi"] == "d-e" and recs["or:E"]["cited"] == 7, "E 的 doi/cited 补空保住")
 chk(recs["or:E"]["status"] == "done" and recs["or:E"]["pdf_path"].endswith("E.pdf"), "E 的下载状态与路径继承")
 chk(recs["or:G"]["status"] == "giveup" and recs["or:G"].get("error") == "or_walled_no_pdf",

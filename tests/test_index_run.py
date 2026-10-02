@@ -96,6 +96,28 @@ c2 = json.load(open(q.CATLOG, encoding="utf-8"))
 chk(c2[0].get("ai_summary") == "外部写进来的精读结论", "第二遍 index 保住了外部并发的 ai_summary")
 chk(c2[0].get("ai_grade") == "A", "第二遍 index 保住了 ai_grade")
 
+# dup_of 副本不进 INDEX.md，但仍留在 catalog.csv 全字段表里
+c3 = json.load(open(q.CATLOG, encoding="utf-8"))
+for r in c3[:5]:
+    r["dup_of"] = c3[100]["key"]
+json.dump(c3, open(q.CATLOG, "w", encoding="utf-8"), ensure_ascii=False)
+with redirect_stdout(io.StringIO()):
+    q.cmd_index()
+idx2 = open(os.path.join(tmp, "INDEX.md"), encoding="utf-8").read()
+chk(idx2.count("- **") == 345, "dup_of 的 5 条不再占索引行：350-5=345（实际 %d）" % idx2.count("- **"))
+chk("另有 5 条是已在库条目的同文异 key 副本" in idx2, "索引抬头交代了隐藏多少 dup，数字不会凭空少")
+import csv as _csv
+rows = list(_csv.DictReader(open(os.path.join(tmp, "catalog.csv"), encoding="utf-8")))
+chk(len(rows) == 351, "catalog.csv 仍是全字段表、没跟着过滤（实际 %d 行）" % len(rows))
+
+# 链接必须是相对根目录的：原来按字面量 "论文/" 截，换机器就截不出来
+sample_line = [ln for ln in idx2.splitlines() if "[原文PDF]" in ln]
+chk(bool(sample_line), "索引里有原文PDF链接")
+if sample_line:
+    chk(tmp.replace("\\", "/") not in sample_line[0],
+        "索引里的 PDF 链接不含绝对路径（不泄漏本机根目录）")
+    chk("/_inbox/" not in sample_line[0], "链接指向分类目录而不是暂存区")
+
 # 锁互斥：另一进程持活锁时 cmd_index 必须直接跳过，不动盘
 other = os.path.join(tmp, "_index.lock")
 open(other, "w", encoding="utf-8").write("%d %f" % (os.getppid(), time.time()))

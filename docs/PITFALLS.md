@@ -167,7 +167,28 @@ merge 照样打印「合并完成 420 篇」，零报错。
 下载器"内存收全 → 验 `%PDF-` 头 → 才落盘"的设计就是为了这个。
 台账则靠 `_write_json_atomic`（fsync + 自检条数 + 退避重试）。
 
-## 四、环境相关
+## 四、OCR 兜底特有的坑
+
+### OCR "没报错"不等于"识别成功"
+
+tesseract 装了，但 `tessdata` 里只有 `chi_sim.traineddata`、**没有 `eng`**：`-l eng` 会
+`Failed loading language 'eng' / Could not initialize tesseract`。如果按返回码或异常判断，
+会以为"跑了但没结果"，实际是根本没识别成。
+OCR 是按页吞掉失败的（不能让一页 OCR 挂掉毁掉整轮 index），所以**唯一的验收办法是看输出长度/字母占比**：
+本库用"文本层 < 2000 字才 OCR，且 OCR 结果必须比文本层更长才算生效"，并在记录上打 `ocr=True`。
+
+### OCR 后端优先级要按"真能跑"排，不按"存在"排
+
+探测顺序 RapidOCR > tesseract：RapidOCR 自带中英模型、纯离线；tesseract 依赖语言包齐不齐。
+`shutil.which('tesseract')` 找得到 ≠ 能用。
+
+### 合成测试页要用真实页面尺寸
+
+一开始用 `pix.width*0.25` 造"扫描件"，字号被挤小、词边界粘在一起（`andvaluefactorsinthe…`），
+OCR 断言因此假失败，误判成兜底能力不行。改成 Letter 612×792 + 13pt + 200dpi 后一次通过。
+**测 OCR/解析这类"对图像质量敏感"的路径，测试样张的尺寸和 DPI 要跟真实材料一致。**
+
+## 五、环境相关
 
 - **arXiv 按 TLS 指纹拦 Python**：urllib 一律 403/406，用 `curl.exe` 兜底。
 - **OpenAlex 匿名 search 有每 IP 每日预算**，用尽回 429（UTC 零点重置）。

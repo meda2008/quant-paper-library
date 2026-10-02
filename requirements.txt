@@ -1,6 +1,12 @@
 # PDF 全文抽取（index 阶段用）
 PyMuPDF>=1.24
 
+# 可选：扫描件 OCR 兜底（NBER 早期工作论文整页是图片，文本层抽不出字）
+# 引擎按 RapidOCR > tesseract 的顺序探测，两者都没有就跳过 OCR、不影响主流程。
+#   pip install rapidocr-onnxruntime        # 自带中英模型、纯离线，推荐
+#   或装 tesseract（需要 tessdata 里有 eng.traineddata）
+# rapidocr-onnxruntime>=1.4
+
 # 其余全是标准库：
 #   urllib.request / xml.etree / csv / json / subprocess(curl.exe) / concurrent.futures
 #
