@@ -1282,6 +1282,11 @@ def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
                     got = _ocr_image(png)
                     if got.strip():
                         parts.append(got)
+                    if (i + 1) % 20 == 0:
+                        # OCR 一篇要几分钟，什么都不得知看起来就像卡死（2026-10-02 就是这样）。
+                        # 只在真正走 OCR 的分支里打，正常条目一条都不多打。
+                        print("      OCR %s：已处理 %d 页，累计 %d 字"
+                              % (os.path.basename(path)[:38], i + 1, sum(len(x) for x in parts)), flush=True)
                 except Exception:
                     pass
                 finally:
@@ -1305,9 +1310,12 @@ def extract_pdf_text(path):
         doc.close()
     if len(full.strip()) >= OCR_MIN_CHARS:
         return full, pages, False
+    print("      文本层只有 %d 字（%d 页）-> 走 OCR 兜底: %s"
+          % (len(full.strip()), pages, os.path.basename(path)[:50]), flush=True)
     got = ocr_pdf(path)
     if len(got.strip()) > len(full.strip()):
         return got, pages, True
+    print("        OCR 没认出更多内容，保留原样", flush=True)
     return full, pages, False
 
 def cmd_index():
