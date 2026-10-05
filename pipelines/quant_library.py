@@ -665,7 +665,7 @@ KEEP_ON_MERGE = ("status", "pdf_path", "local_done", "text_done", "txt_path",
                  "dup_of", "retries",
                  # 台账救援与扫描件 OCR 的可追溯标记：漏在这里就会被每日 catalog 重写抹掉
                  # （2026-10-02 加，同 dup_of 那次的教训）
-                 "rebound_at", "ocr", "ocr_pending")
+                 "rebound_at", "ocr", "ocr_pending", "abstract_cleared_at")
 
 OR_TERMS = ["stock selection", "cross-section of stock returns", "factor investing",
     "alpha factor stock", "stock price prediction", "empirical asset pricing",
@@ -754,7 +754,7 @@ BAK_KEEP = 8          # 33MB × 8 ≈ 270MB，Z: 只剩 10GB，够用且不吃�
 
 def _bak_dir():
     """BAK 必须在调用时按当前 ROOT 算：离线测试会把 ROOT 指到临时目录，
-    模块级常量会让测试把 33MB 快照写进真的 Z:/论文/_bak。"""
+    模块级常量会让测试把 33MB 快照写进真实数据根目录/_bak。"""
     return os.path.join(ROOT, "_bak")
 
 def backup_catalog(tag=""):

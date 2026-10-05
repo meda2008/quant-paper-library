@@ -14,10 +14,29 @@ QUEUE = os.path.join(ROOT, "deepread_queue.jsonl")
 PRIO = ["中国A股", "机器学习选股", "多因子模型与检验", "动量与反转", "价值与基本面因子",
         "组合优化与配置", "另类数据与文本挖掘", "低波动与风险因子"]
 
+# 发车下限：rel 管"是不是能拿来做选股/因子/组合"。实测 A+B 率随 rel 单调上升
+# （rel>=10 为 60.0%、5-9 为 42.4%、1-4 为 20.8%、0 只有 9.6%），
+# 而批26 那轮 rel 中位数只有 2、A+B 掉到 15.5% —— 高相关的矿脉被前两批抽干时，
+# 原先"只按 rel 排序、不设下限"会把长尾边缘料照样发出去，白花读手额度。
+# 现在宁缺毋滥：低于下限的不进队列（也不删，留着等以后重估）。
+MIN_REL = int(os.environ.get("MIN_REL", "3"))
+
+
+def _rel_of(r):
+    """台账里存过 rel 就用存的，没有就按题摘现算（与 index 里同一把尺子）。"""
+    v = r.get("rel")
+    if v is None or v == "":
+        return q.rel_score(r.get("title"), r.get("abstract"))
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return q.rel_score(r.get("title"), r.get("abstract"))
+
 def excerpt_path(rec):
     return rec.get("txt_path") or ""
 
-def prepare(n=120):
+def prepare(n=120, min_rel=None):
+    floor = MIN_REL if min_rel is None else int(min_rel)
     c = json.load(open(CATALOG, encoding="utf-8"))
     queued = set()
     import glob as _g
@@ -44,13 +63,18 @@ def prepare(n=120):
         tier = {"strong": 0, "body": 1, "fail": 2}.get(r.get("gate_level") or "", 1)
         # 门槛只管"是不是金融"，rel 管"是不是能拿来做选股/因子/组合"。
         # 批15 的教训是门槛 strong 里塞满了保险精算/央行/电网/加密，光靠门槛排队照样浪费读手，
-        # 所以同层内按 rel 从高到低排（rel 只排队，不做删除）。
-        rel = r.get("rel")
-        if rel is None:
-            rel = q.rel_score(r.get("title"), r.get("abstract"))
-        return (tier, -int(rel), pr, no_abs, "0" if r.get("date", "") >= "2024" else "1")
+        # 所以同层内按 rel 从高到低排。
+        return (tier, -_rel_of(r), pr, no_abs, "0" if r.get("date", "") >= "2024" else "1")
+    n_before = len(cand)
+    low_rel = [r for r in cand if _rel_of(r) < floor]
+    cand = [r for r in cand if _rel_of(r) >= floor]
     cand.sort(key=lambda r: (rank(r), r.get("date", "")), reverse=False)
     sel = cand[:n]
+    print("rel 下限 MIN_REL=%d：合格 %d 篇，被挡下 %d 篇（不删，留在库里等以后重估）"
+          % (floor, len(cand), len(low_rel)))
+    if len(sel) < n:
+        print("  注：本批只凑到 %d 篇（要 %d 篇）——宁缺毋滥，不拿低相关料补数"
+              % (len(sel), n))
     with open(QUEUE, "w", encoding="utf-8") as f:
         for r in sel:
             f.write(json.dumps({"key": r["key"], "title": r["title"], "txt": r["txt_path"],

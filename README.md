@@ -58,6 +58,7 @@ python pipelines/quant_library.py status         # 看当前台账
 | --- | --- | --- |
 | `PAPER_ROOT` | 见下 | 数据根目录 |
 | `MIN_FREE_GB` | `3.0` | 剩余空间低于此值 harvest 主动停手 |
+| `MIN_REL` | `3` | `deepread.py prepare` 的发车下限：`rel` 低于它不进队列 |
 | `OA_PAGES` | `1` | OpenAlex 每词条翻几页 |
 | `NBER_PAGES` | `1` | NBER 每词条翻几页 |
 
@@ -67,6 +68,12 @@ python pipelines/quant_library.py status         # 看当前台账
 python pipelines/deepread.py prepare 420     # 出队：<ROOT>/deepread_queue.jsonl
 python pipelines/deepread.py merge <结果.jsonl> [更多结果.jsonl ...]
 ```
+
+`prepare` 有**选题下限** `MIN_REL`（默认 3）：`rel` 衡量"是不是能拿来做选股/因子/组合"，
+实测 A+B 率随它单调上升（≥10 为 60.0%、5-9 为 42.4%、1-4 为 20.8%、0 为 9.6%）。
+低于下限的不进队列也不删除。凑不满一批时**宁可发小批**，不拿低相关料补数——
+高相关存量被读穿的那一轮，无下限会把整批读手额度花在 9.6% 产出率的料上。
+紧急清库存可以 `MIN_REL=0` 退回无门槛。
 
 `merge` 的文件参数**可以直接传多个**，一次合流一整批。
 
@@ -163,6 +170,7 @@ cd tests && for t in test_*.py; do python $t; done
 | `test_harvest_persist` | harvest 状态持久化、**空间闸真会停** |
 | `test_root_resolution` | 根目录解析优先级——防"忘设环境变量就写进一个新建的空库" |
 | `test_ocr_fallback` | 扫描件 OCR 兜底：真造一本"只有图片没有文本层"的 PDF 走端到端；没有 OCR 后端时整组跳过不算失败 |
+| `test_prepare_floor` | `prepare` 的 `MIN_REL` 发车下限：低相关不进队列、凑不满不补数、`MIN_REL=0` 退回旧行为 |
 
 `test_catalog_merge` 里有一段白名单护栏：`quant_library` 新增检索腿而测试没打桩时
 会当场断言失败，而不是安静地去联网。2026-09-30 和 10-01 各被它抓到过一次真实外呼。
