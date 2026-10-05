@@ -60,7 +60,15 @@ python pipelines/quant_library.py status         # 看当前台账
 | `MIN_FREE_GB` | `3.0` | 剩余空间低于此值 harvest 主动停手 |
 | `MIN_REL` | `8` | `deepread.py prepare` 的发车下限：`rel` 低于它不进队列 |
 | `OA_PAGES` | `1` | OpenAlex 每词条翻几页 |
-| `NBER_PAGES` | `1` | NBER 每词条翻几页 |
+| `NBER_PAGES` | `5` | NBER（OpenAlex 里按 NBER 来源过滤）每词条翻几页 |
+| `NBER_SORTS` | `publication_date:desc,relevance_score:desc` | NBER 每个词条跑哪几种排序；日期序抓增量，相关度序补存量 |
+
+`OA_PAGES` 与 `NBER_PAGES` 抢的是**同一个池子**：OpenAlex 匿名接口按 IP 记每日预算，00:00 UTC 重置，
+打满后报 `Insufficient budget`（curl 侧表现为 `rc=0 http=429`）。`cmd_catalog` 里 `collect_nber()`
+排在 `collect_openalex()` 之前，所以是 NBER 先拿条数、通用腿常常拿到 0。
+2026-10-05 把 NBER 提到 5 页的依据：那轮 NBER 1136 候选 → 1101 入库、仅 35 失败，418 篇新料
+金融门槛剔除 0 篇，而同期的关键词腿还得靠题摘粗筛挡误召回——把预算押在命中率最高的腿上。
+通用腿产率历史上只有约 1%，被挤掉是可接受的代价；想退回旧行为设 `NBER_PAGES=2`。
 
 ### `deepread.py` — 精读选题与合流
 

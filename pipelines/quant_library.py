@@ -543,7 +543,12 @@ NBER_SOURCE = "S2809516038"
 # counts against the free daily budget shared by everyone on your network's IP address, and that
 # budget is used up ($0 remaining; resets at midnight UTC)"。所以两条腿都要省着用：
 # OpenAlex 每词条只取第 1 页，NBER 每词条也只取 1 页，谁先跑谁拿条数（catalog 里 NBER 在前）。
-NBER_PAGES = int(os.environ.get("NBER_PAGES", "2"))
+# 2026-10-05：NBER 默认从 2 页提到 5 页。依据是当天实测——NBER 腿 1136 候选里 1101 成功入库、
+# 只 35 失败（97% 命中），当轮 418 篇新料金融门槛剔除 0 篇；同期 arXiv 关键词腿仍靠题摘粗筛
+# 挡误召回。唯一还在产净料的腿命中率这么高，就把它的日预算份额提到每词条 10 次请求（5 页 × 2 排序）。
+# 代价：collect_openalex 通用腿更容易撞 429（10-05 已实测发生），该腿历史产率约 1%，损失可接受。
+# 想退回旧行为：设环境变量 NBER_PAGES=2。
+NBER_PAGES = int(os.environ.get("NBER_PAGES", "5"))
 OA_PAGES = int(os.environ.get("OA_PAGES", "1"))
 # 每个词条跑两遍排序：新到货（publication_date desc）抓增量，最相关（relevance desc）抓存量。
 # 为什么要后者：库已经长大，日期序翻页翻到的多是早已入库的老论文，供给被"最新"这一种
