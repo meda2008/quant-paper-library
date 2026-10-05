@@ -543,13 +543,25 @@ NBER_SOURCE = "S2809516038"
 # counts against the free daily budget shared by everyone on your network's IP address, and that
 # budget is used up ($0 remaining; resets at midnight UTC)"。所以两条腿都要省着用：
 # OpenAlex 每词条只取第 1 页，NBER 每词条也只取 1 页，谁先跑谁拿条数（catalog 里 NBER 在前）。
-NBER_PAGES = 1
+NBER_PAGES = int(os.environ.get("NBER_PAGES", "2"))
 OA_PAGES = int(os.environ.get("OA_PAGES", "1"))
+# 每个词条跑两遍排序：新到货（publication_date desc）抓增量，最相关（relevance desc）抓存量。
+# 为什么要后者：库已经长大，日期序翻页翻到的多是早已入库的老论文，供给被"最新"这一种
+# 取法锁死了；换成按相关度取，才能把没见过的经典与高相关论文捞上来（2026-10-03 待下载归零、
+# 可读池 rel>=3 只剩 2 篇，就是这个瓶颈）。相关性排序只在带检索词的接口上有效，
+# 不支持时这一遍会走下面的失败分支，不影响日期那一遍。
+NBER_SORTS = [s for s in (os.environ.get("NBER_SORTS",
+              "publication_date:desc,relevance_score:desc")).split(",") if s.strip()]
+# 词条只加"因子/选股/组合"方向的精确短语，不做泛词摊大饼（批15 的定论仍然有效）。
 NBER_TERMS = ["asset pricing", "factor model stock returns", "stock market anomalies",
     "portfolio allocation", "momentum returns", "credit spreads", "expected returns",
     "volatility risk premium", "institutional investors", "mutual fund flows",
     "household finance", "consumption and asset returns", "short selling constraints",
-    "machine learning asset pricing", "replication crisis finance"]
+    "machine learning asset pricing", "replication crisis finance",
+    "cross-section of stock returns", "value premium", "profitability factor",
+    "transaction costs trading", "downside risk", "cash holding", "stock repurchase",
+    "analyst forecast", "post earnings announcement drift", "liquidity premium",
+    "return predictability", "index rebalancing", "risk parity"]
 
 def nber_pdf_url(doi):
     m = re.search(r"10\.3386/(w\d+)", doi or "")
@@ -565,10 +577,10 @@ def collect_nber():
         if consec >= 3:
             print("  NBER 连续失败，判定接口暂不可用，本轮跳过 NBER", flush=True)
             break
-        for page in range(1, NBER_PAGES + 1):
+        for sort, page in [(s, p) for s in NBER_SORTS for p in range(1, NBER_PAGES + 1)]:
             url = "https://api.openalex.org/works?" + urllib.parse.urlencode({
                 "filter": "primary_location.source.id:%s,title_and_abstract.search:%s" % (NBER_SOURCE, term),
-                "sort": "publication_date:desc", "per-page": 200, "page": page, "mailto": MAILTO})
+                "sort": sort, "per-page": 200, "page": page, "mailto": MAILTO})
             try:
                 data = json.loads(http_get(url)); consec = 0
             except Exception as e:
