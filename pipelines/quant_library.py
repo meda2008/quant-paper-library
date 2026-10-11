@@ -1276,9 +1276,100 @@ OCR_MIN_CHARS = 2000        # PyMuPDF 抽出来的字少于这个数才考虑 OC
 OCR_MAX_PAGES = 160         # 上限，防止一本 400 页的书把整轮 index 拖死
 OCR_DPI = 200
 
-def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
+# ---- 坏档可读性判定（2026-10-11 加）----
+# 为什么不能只看长度：位移字体/符号字体的坏档**每页都有几千字**，只是内容是垃圾。
+# 老条件 `len(full.strip()) >= OCR_MIN_CHARS` 对它们一律放行，于是坏档一路活到被 AI 读手
+# 判级为止——10-11 全库普查发现 4 个已判级（w7169/w7170/w7409/w8744）就是打在乱码正文上的。
+# 判据要绕开三个已知假阳性：中/日/韩/俄正文、纯数学页（几乎没虚词但字符正常）、
+# 以及"整篇本来就短"的会议摘要。所以顺序是：控制字符占比 → 非拉丁文字占比 → 英文虚词密度
+# → 只有虚词密度确实极低时才付一次位移搜索的钱。
+EN_STOP = ("the ", "and ", "of ", "to ", "in ", "is ", "we ", "that ", "this ", "for ")
+_CTRL = "\n\r\t\f\v"
+_NONLATIN = ((0x3000, 0x9FFF), (0xFF00, 0xFFEF), (0x0400, 0x04FF), (0x0590, 0x05FF),
+             (0x0600, 0x06FF), (0x0E00, 0x0EFF), (0xAC00, 0xD7AF), (0x0370, 0x03FF))
+GARBLED_CTRL = 0.05         # 控制字符（非换行制表符）占比超过这个数 = 坏档，不看虚词也判
+GARBLED_CTRL_MILD = 0.012   # 轻度控制字符污染：要配"虚词确实很稀"才判，否则是数学字体
+GARBLED_CTRL_MILD_STOP = 8.0
+GARBLED_STOP_PER_K = 2.0    # 每千字英文虚词命中低于此数才考虑"读不通"
+SHIFT_GAIN = 4.0            # 某个位移能把虚词密度抬到 4 倍以上 -> 确认是位移坏档
+OCR_GARBLED_MAX_PAGES = int(os.environ.get("OCR_GARBLED_MAX_PAGES", "400"))
+_OCR_GARBLED_USED = [0]     # 每轮进程级预算；超了就留下坏档，由 _shift_census 复查
+
+
+def _ctrl_ratio(t):
+    if not t:
+        return 0.0
+    n = sum(1 for c in t if ord(c) < 32 and c not in _CTRL)
+    return n / float(len(t))
+
+
+def _nonlatin_share(t):
+    if not t:
+        return 0.0
+    n = a = 0
+    for c in t:
+        if c.isalpha():
+            a += 1
+            o = ord(c)
+            if any(lo <= o <= hi for lo, hi in _NONLATIN):
+                n += 1
+    return n / float(a) if a else 0.0
+
+
+def _stop_per_k(t):
+    """每千字英文虚词命中数。可读英文正文实测 ~15-40，坏档 ~0-3。"""
+    if not t:
+        return 0.0
+    low = t.lower()
+    return sum(low.count(w) for w in EN_STOP) / (len(t) / 1000.0)
+
+
+def _shifted_gain(t):
+    """只在"虚词密度已经极低"这条昂贵分支里调用：试 1..40 位移，看能不能救回虚词。"""
+    base = _stop_per_k(t)
+    seg = t[:20000]
+    for d in range(1, 41):
+        g = "".join(chr((ord(c) - d) % 128) if 0x24 <= ord(c) <= 0x7E else c for c in seg)
+        s = _stop_per_k(g)
+        if s >= GARBLED_STOP_PER_K and s > SHIFT_GAIN * max(0.05, base):
+            return d
+    return 0
+
+
+def _is_garbled(t):
+    """True = 这页/这篇正文抽取坏了，值得走 OCR。False = 读得通（包括非拉丁正文）。
+
+    三条判据（10-11 在 400 篇随机样本 + 18 篇已知样本上校准出来的）：
+      R1 控制字符占比 > 0.05      —— 符号字体/CID 缺 ToUnicode，没有争议（w12084 0.57、w8259 0.65）
+      R2 控制字符 > 0.012 且虚词/千字 < 8 —— 轻度污染且英文确实没读通（w7409 ctrl .0138/虚词 3.09）
+      R3 虚词/千字 < 2 且某个位移能把虚词抬起来 —— 位移字体（w7169 0.00、w6833 0.94）
+    R2 必须配"虚词稀"这个第二条件：`arxiv:2501.06701v2` 那种数学论文的下标字体也带 1.3% 控制字符，
+    但虚词/千字 30.5，只看占比会误判——误判一次的代价是对 34 页好论文白烧一遍 OCR。
+    **R1 要走在非拉丁放行之前**：`w8259` 是"45% 西里尔字母 + 65% 控制字符"的混排坏档，
+    先放行非拉丁就会把它漏掉（校准实测：改顺序之前漏的就是它）。
+    """
+    if not t or len(t.strip()) < 200:
+        return False
+    ctrl = _ctrl_ratio(t)
+    if ctrl > GARBLED_CTRL:
+        return True
+    if _nonlatin_share(t) > 0.12:
+        return False            # 中文/俄文/日文正文，本来就读得通，别拖进 OCR
+    stop = _stop_per_k(t)
+    if ctrl > GARBLED_CTRL_MILD and stop < GARBLED_CTRL_MILD_STOP:
+        return True
+    return stop < GARBLED_STOP_PER_K and _shifted_gain(t) > 0
+
+
+def _ocr_worth(iters):
+    return OCR_GARBLED_MAX_PAGES <= 0 or _OCR_GARBLED_USED[0] < OCR_GARBLED_MAX_PAGES
+
+
+def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI, only_garbled=False):
     """扫描件兜底：整页是图片的老论文（NBER 早期工作论文尤其多），PyMuPDF 抽出来是 0 字。
-    逐页渲染成 PNG 交给 OCR，**只在外层抽不到字时才调用**。
+    逐页渲染成 PNG 交给 OCR。
+    only_garbled=True 是 10-11 新加的"坏档兜底"模式：**文本层读不通的页也 OCR**，并把
+    该页换成识别结果（原本可读的页保持文本层原样，免得把好的元数据/扉页打坏）。
     某一页超时或识别失败只跳过该页，不抛异常——解析主流程不能因为 OCR 挂掉。"""
     if not _ocr_engine():
         return ""
@@ -1289,14 +1380,33 @@ def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
             for i, pg in enumerate(doc):
                 if i >= max_pages:
                     break
-                if pg.get_text().strip():
-                    continue                      # 这页本来就有文本层，别浪费一次 OCR
-                if not pg.get_images(full=True):
-                    continue                      # 既没字也没图，是真空页
+                raw = ""
+                try:
+                    raw = pg.get_text()
+                except Exception:
+                    raw = ""
+                if only_garbled:
+                    # 坏档模式：这页本来就读得通就别浪费一次 OCR；读不通才认。
+                    # 注意这里不看 get_images()——矢量坏档往往一张图都没有。
+                    if not _is_garbled(raw):
+                        parts.append(raw)
+                        continue
+                    if not _ocr_worth(i):
+                        parts.append(raw)          # 预算用尽，保持原样，交给普查复查
+                        continue
+                else:
+                    if raw.strip():
+                        continue                  # 这页本来就有文本层，别浪费一次 OCR
+                    if not pg.get_images(full=True):
+                        continue                  # 既没字也没图，是真空页
                 png = os.path.join(tmpd, "p%04d.png" % i)
                 try:
                     pg.get_pixmap(dpi=dpi).save(png)
                     got = _ocr_image(png)
+                    if only_garbled and got and _stop_per_k(got) <= _stop_per_k(raw):
+                        got = raw                 # 认回来的还不如原样，别换
+                    if only_garbled:
+                        _OCR_GARBLED_USED[0] += 1
                     if got.strip():
                         parts.append(got)
                     if (i + 1) % 20 == 0:
@@ -1305,7 +1415,7 @@ def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
                         print("      OCR %s：已处理 %d 页，累计 %d 字"
                               % (os.path.basename(path)[:38], i + 1, sum(len(x) for x in parts)), flush=True)
                 except Exception:
-                    pass
+                    parts.append(raw if only_garbled else "")
                 finally:
                     if os.path.exists(png):
                         os.remove(png)
@@ -1318,7 +1428,8 @@ def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
     return "\n".join(parts)
 
 def extract_pdf_text(path):
-    """先按文本层抽；抽出来近乎为空（扫描件）才走 OCR。返回 (正文, 是否 OCR 得来的)。"""
+    """先按文本层抽；抽出来近乎为空（扫描件）**或抽出来是坏档**才走 OCR。
+    返回 (正文, 页数, 是否 OCR 得来的)。"""
     doc = fitz.open(path)
     try:
         full = "\n".join(p.get_text() for p in doc)
@@ -1326,6 +1437,16 @@ def extract_pdf_text(path):
     finally:
         doc.close()
     if len(full.strip()) >= OCR_MIN_CHARS:
+        if os.environ.get("OCR_GARBLED", "1") != "0" and _is_garbled(full):
+            print("      文本层 %d 字但判定为坏档（虚词/千字 %.1f，控制符占比 %.3f）-> 逐页 OCR: %s"
+                  % (len(full.strip()), _stop_per_k(full), _ctrl_ratio(full),
+                     os.path.basename(path)[:44]), flush=True)
+            got = ocr_pdf(path, only_garbled=True)
+            if got.strip() and _stop_per_k(got) > _stop_per_k(full):
+                print("        OCR 后虚词/千字 %.1f -> %.1f，采用识别结果"
+                      % (_stop_per_k(full), _stop_per_k(got)), flush=True)
+                return got, pages, True
+            print("        OCR 没能提升可读性，保留原样", flush=True)
         return full, pages, False
     print("      文本层只有 %d 字（%d 页）-> 走 OCR 兜底: %s"
           % (len(full.strip()), pages, os.path.basename(path)[:50]), flush=True)
