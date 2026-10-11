@@ -1294,6 +1294,7 @@ GARBLED_STOP_PER_K = 2.0    # 每千字英文虚词命中低于此数才考虑"�
 SHIFT_GAIN = 4.0            # 某个位移能把虚词密度抬到 4 倍以上 -> 确认是位移坏档
 OCR_GARBLED_MAX_PAGES = int(os.environ.get("OCR_GARBLED_MAX_PAGES", "400"))
 _OCR_GARBLED_USED = [0]     # 每轮进程级预算；超了就留下坏档，由 _shift_census 复查
+_OCR_BUDGET_SKIPPED = [0]   # 因为预算耗尽而没 OCR 的页数（10-11 实测被这个坑了一次，见下）
 
 
 def _ctrl_ratio(t):
@@ -1392,6 +1393,7 @@ def ocr_pdf(path, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI, only_garbled=False):
                         parts.append(raw)
                         continue
                     if not _ocr_worth(i):
+                        _OCR_BUDGET_SKIPPED[0] += 1
                         parts.append(raw)          # 预算用尽，保持原样，交给普查复查
                         continue
                 else:
@@ -1441,12 +1443,22 @@ def extract_pdf_text(path):
             print("      文本层 %d 字但判定为坏档（虚词/千字 %.1f，控制符占比 %.3f）-> 逐页 OCR: %s"
                   % (len(full.strip()), _stop_per_k(full), _ctrl_ratio(full),
                      os.path.basename(path)[:44]), flush=True)
+            skip_before = _OCR_BUDGET_SKIPPED[0]
             got = ocr_pdf(path, only_garbled=True)
             if got.strip() and _stop_per_k(got) > _stop_per_k(full):
                 print("        OCR 后虚词/千字 %.1f -> %.1f，采用识别结果"
                       % (_stop_per_k(full), _stop_per_k(got)), flush=True)
                 return got, pages, True
-            print("        OCR 没能提升可读性，保留原样", flush=True)
+            # 归因要说清楚，别把"没跑"报成"跑了没用"：10-11 一次性回补 22 篇时，
+            # 400 页/进程的预算在第 13 篇用尽，后面 8 篇全部 0.0 秒"没提升"，
+            # 看着像 OCR 对这些坏档无能为力，其实是根本没烧 OCR。
+            if _OCR_BUDGET_SKIPPED[0] > skip_before:
+                print("        OCR 预算用尽（本轮累计跳过 %d 页，上限 %d 页/进程）-> 保留原文本层；"
+                      "要么调大 OCR_GARBLED_MAX_PAGES 再来一遍，要么交给普查复查"
+                      % (_OCR_BUDGET_SKIPPED[0], OCR_GARBLED_MAX_PAGES), flush=True)
+            else:
+                print("        OCR 认回来的并不更可读（虚词/千字 %.1f -> %.1f），保留原样"
+                      % (_stop_per_k(full), _stop_per_k(got)), flush=True)
         return full, pages, False
     print("      文本层只有 %d 字（%d 页）-> 走 OCR 兜底: %s"
           % (len(full.strip()), pages, os.path.basename(path)[:50]), flush=True)

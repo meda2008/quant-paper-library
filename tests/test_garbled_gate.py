@@ -140,9 +140,16 @@ else:
     chk(q._OCR_GARBLED_USED[0] == before, "正常 PDF 一页 OCR 都没烧（计数器没动）")
 
     q._OCR_GARBLED_USED[0] = 10 ** 6
+    before_skip = q._OCR_BUDGET_SKIPPED[0]
     full3, npg3, used3 = q.extract_pdf_text(garbled_pdf)
     chk(used3 is False and q._is_garbled(full3) is True,
         "预算用尽时保留坏档原文、不崩（后面由普查复查）")
+    # 归因守卫：预算没跑成的页必须被单独计数，否则日志里"OCR 没能提升可读性"
+    # 会把"根本没烧 OCR"说成"烧了没用"（10-11 一次性回补 22 篇就在第 13 篇撞上 400 页上限，
+    # 后面 8 篇全部 0.0 秒"没提升"，看着像方法不行，其实是预算用尽）
+    chk(q._OCR_BUDGET_SKIPPED[0] > before_skip,
+        "预算用尽的页被计入 _OCR_BUDGET_SKIPPED（%d -> %d）" % (
+            before_skip, q._OCR_BUDGET_SKIPPED[0]))
     q._OCR_GARBLED_USED[0] = 0
 
     os.environ["OCR_GARBLED"] = "0"
