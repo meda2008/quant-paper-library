@@ -35,6 +35,10 @@ tmp = tempfile.mkdtemp(prefix="prepfloor_")
 dr.ROOT = tmp
 dr.CATALOG = os.path.join(tmp, "catalog.json")
 dr.QUEUE = os.path.join(tmp, "deepread_queue.jsonl")
+# 10-12 新加的正文标记缓存也必须挪进临时目录：漏了它，测试会把
+# <ROOT>/_marker_cache.json 写进真实库根目录（实测发生过一次，3153 字节的测试残留）
+dr.MARK_CACHE_PATH = os.path.join(tmp, "_marker_cache.json")
+dr._MARK_CACHE = None
 txt_dir = os.path.join(tmp, "text")
 os.makedirs(txt_dir, exist_ok=True)
 
